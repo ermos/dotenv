@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// Parse .env file and inject values into environment variables
 func Parse(location string) error {
 	file, err := os.Open(location)
 	if err != nil {
