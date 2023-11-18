@@ -8,9 +8,9 @@ func TestRequireOK(t *testing.T) {
 	}
 
 	err := Require(
-		"toto",
-		"lib_desc",
-		)
+		"NAME",
+		"DESCRIPTION",
+	)
 	if err != nil {
 		t.Error(err)
 	}
@@ -22,11 +22,11 @@ func TestRequireNOK(t *testing.T) {
 	}
 
 	err := Require(
-		"toto",
-		"lib_desc",
-		"tata",
+		"NAME",
+		"DESCRIPTION",
+		"INVALID",
 	)
 	if err == nil {
-		t.Errorf("tata is not define but available")
+		t.Errorf("INVALID is not define but return nil")
 	}
 }

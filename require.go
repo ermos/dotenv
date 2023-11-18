@@ -3,14 +3,25 @@ package dotenv
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
-// Allow to require an environment variable which is necessary for your golang application
+// Require check if the given keys are set in the environment variables.
 func Require(keys ...string) error {
+	var required []string
+
 	for _, key := range keys {
 		if os.Getenv(key) == "" {
-			return fmt.Errorf("%s's environment variable is required", key)
+			required = append(required, key)
 		}
 	}
+
+	if len(required) > 0 {
+		return fmt.Errorf(
+			"the following environment variables are required: %s",
+			strings.Join(required, ", "),
+		)
+	}
+
 	return nil
 }
