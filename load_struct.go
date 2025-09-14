@@ -7,6 +7,16 @@ import (
 	"strconv"
 )
 
+// Validator defines the interface for format validators
+type Validator func(value reflect.Value) error
+
+// LoadOptions provides configuration options for LoadStructWithOptions
+type LoadOptions struct {
+	// Validators is a map of validator name to validator implementation
+	// When validator tag is present, the corresponding validator will be used
+	Validators map[string]Validator
+}
+
 func LoadStruct(data interface{}) error {
 	dataType := reflect.TypeOf(data)
 	dataValue := reflect.ValueOf(data)
@@ -18,16 +28,31 @@ func LoadStruct(data interface{}) error {
 	dataType = dataType.Elem()
 	dataValue = dataValue.Elem()
 
-	return parseFields(dataType, dataValue)
+	return parseFields(dataType, dataValue, LoadOptions{})
 }
 
-func parseFields(dataType reflect.Type, dataValue reflect.Value) error {
+// LoadStructWithOptions loads environment variables into a struct with additional options
+func LoadStructWithOptions(data interface{}, opts LoadOptions) error {
+	dataType := reflect.TypeOf(data)
+	dataValue := reflect.ValueOf(data)
+
+	if dataType.Kind() != reflect.Ptr || dataValue.IsNil() {
+		return fmt.Errorf("data must be a pointer to a struct")
+	}
+
+	dataType = dataType.Elem()
+	dataValue = dataValue.Elem()
+
+	return parseFields(dataType, dataValue, opts)
+}
+
+func parseFields(dataType reflect.Type, dataValue reflect.Value, opts LoadOptions) error {
 	for i := 0; i < dataType.NumField(); i++ {
 		field := dataType.Field(i)
 		value := dataValue.Field(i)
 
 		if value.Kind() == reflect.Struct {
-			if err := parseFields(field.Type, value); err != nil {
+			if err := parseFields(field.Type, value, opts); err != nil {
 				return err
 			}
 			continue
@@ -72,6 +97,16 @@ func parseFields(dataType reflect.Type, dataValue reflect.Value) error {
 			value.SetFloat(floatVal)
 		default:
 			return fmt.Errorf("unsupported type for field %s", field.Name)
+		}
+
+		// Validate format if validator is provided
+		validatorTag := field.Tag.Get("validator")
+		if validatorTag != "" && opts.Validators != nil {
+			if validator, exists := opts.Validators[validatorTag]; exists {
+				if err := validator(value); err != nil {
+					return fmt.Errorf("format validation failed for field %s: %s", field.Name, err)
+				}
+			}
 		}
 	}
 
