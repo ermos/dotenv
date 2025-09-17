@@ -51,6 +51,11 @@ func parseFields(dataType reflect.Type, dataValue reflect.Value, opts LoadOption
 		field := dataType.Field(i)
 		value := dataValue.Field(i)
 
+		// Skip unexported fields
+		if !value.CanSet() {
+			continue
+		}
+
 		if value.Kind() == reflect.Struct {
 			if err := parseFields(field.Type, value, opts); err != nil {
 				return err
@@ -63,9 +68,22 @@ func parseFields(dataType reflect.Type, dataValue reflect.Value, opts LoadOption
 			continue
 		}
 
+		isRequired := false
+		if reqTag := field.Tag.Get("required"); reqTag == "true" {
+			isRequired = true
+		}
+
 		envValue, found := os.LookupEnv(envTag)
 		if !found {
-			continue
+			// Use Lookup to distinguish between missing tag and empty tag value
+			defaultTag, hasDefault := field.Tag.Lookup("default")
+			if !hasDefault {
+				if isRequired {
+					return fmt.Errorf("required environment variable %s is not set", envTag)
+				}
+				continue
+			}
+			envValue = defaultTag
 		}
 
 		switch value.Kind() {
