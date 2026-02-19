@@ -10,7 +10,10 @@ import (
 )
 
 // Compile regex once at package level for better performance
-var re = regexp.MustCompile(`(?m)(\$\{.*?})`)
+// Matches both ${VAR} and $VAR syntax
+// - ${VAR}: braced syntax, matches any characters between ${ and }
+// - $VAR: simple syntax, matches $ followed by valid identifier (letter/underscore, then alphanumeric/underscore)
+var re = regexp.MustCompile(`\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*`)
 
 // Parse parses the .env file located at the given location and set the environment variables.
 // This function now properly handles:
@@ -61,10 +64,7 @@ func Parse(location string) error {
 		value := processEnvValue(rawValue)
 
 		// Variable substitution
-		for _, v := range re.FindAllString(value, -1) {
-			name := strings.TrimRight(strings.TrimLeft(v, "${"), "}")
-			value = strings.ReplaceAll(value, v, os.Getenv(name))
-		}
+		value = processSubstitution(value)
 
 		if err = os.Setenv(key, value); err != nil {
 			return err
@@ -175,4 +175,20 @@ func stripExportPrefix(line string) string {
 	}
 
 	return line
+}
+
+// processSubstitution replaces variable references with their values.
+// Supports both ${VAR} and $VAR syntax.
+func processSubstitution(value string) string {
+	return re.ReplaceAllStringFunc(value, func(match string) string {
+		var name string
+		if strings.HasPrefix(match, "${") {
+			// ${VAR} syntax - extract name between ${ and }
+			name = match[2 : len(match)-1]
+		} else {
+			// $VAR syntax - extract name after $
+			name = match[1:]
+		}
+		return os.Getenv(name)
+	})
 }
