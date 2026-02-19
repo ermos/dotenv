@@ -4,16 +4,9 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"unicode"
 )
-
-// Compile regex once at package level for better performance
-// Matches both ${VAR} and $VAR syntax
-// - ${VAR}: braced syntax, matches any characters between ${ and }
-// - $VAR: simple syntax, matches $ followed by valid identifier (letter/underscore, then alphanumeric/underscore)
-var re = regexp.MustCompile(`\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*`)
 
 // Parse parses the .env file located at the given location and set the environment variables.
 // This function now properly handles:
@@ -178,17 +171,100 @@ func stripExportPrefix(line string) string {
 }
 
 // processSubstitution replaces variable references with their values.
-// Supports both ${VAR} and $VAR syntax.
+// Supports both ${VAR} and $VAR syntax, with optional default values.
+// Default value syntax:
+//   - ${VAR:-default} : use default if VAR is unset or empty
+//   - ${VAR-default}  : use default only if VAR is unset
 func processSubstitution(value string) string {
-	return re.ReplaceAllStringFunc(value, func(match string) string {
-		var name string
-		if strings.HasPrefix(match, "${") {
-			// ${VAR} syntax - extract name between ${ and }
-			name = match[2 : len(match)-1]
-		} else {
-			// $VAR syntax - extract name after $
-			name = match[1:]
+	var result strings.Builder
+	i := 0
+
+	for i < len(value) {
+		if value[i] == '$' && i+1 < len(value) {
+			if value[i+1] == '{' {
+				// ${VAR} syntax - find matching closing brace
+				content, end := extractBracedContent(value, i+2)
+				if end > i {
+					result.WriteString(resolveWithDefault(content))
+					i = end
+					continue
+				}
+			} else if isIdentifierStart(value[i+1]) {
+				// $VAR syntax
+				end := i + 2
+				for end < len(value) && isIdentifierChar(value[end]) {
+					end++
+				}
+				name := value[i+1 : end]
+				result.WriteString(os.Getenv(name))
+				i = end
+				continue
+			}
 		}
-		return os.Getenv(name)
-	})
+		result.WriteByte(value[i])
+		i++
+	}
+
+	return result.String()
+}
+
+// extractBracedContent extracts content from ${...}, handling nested braces.
+// Returns the content and the index after the closing brace.
+func extractBracedContent(s string, start int) (string, int) {
+	depth := 1
+	i := start
+
+	for i < len(s) && depth > 0 {
+		if s[i] == '{' {
+			depth++
+		} else if s[i] == '}' {
+			depth--
+		}
+		if depth > 0 {
+			i++
+		}
+	}
+
+	if depth == 0 {
+		return s[start:i], i + 1
+	}
+	return "", start
+}
+
+// isIdentifierStart checks if a byte can start a variable name.
+func isIdentifierStart(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || b == '_'
+}
+
+// isIdentifierChar checks if a byte can be part of a variable name.
+func isIdentifierChar(b byte) bool {
+	return isIdentifierStart(b) || (b >= '0' && b <= '9')
+}
+
+// resolveWithDefault handles ${VAR}, ${VAR:-default}, and ${VAR-default} syntax.
+func resolveWithDefault(content string) string {
+	// Check for :- (use default if unset OR empty)
+	if idx := strings.Index(content, ":-"); idx != -1 {
+		name := content[:idx]
+		defaultVal := content[idx+2:]
+		val, exists := os.LookupEnv(name)
+		if !exists || val == "" {
+			return processSubstitution(defaultVal) // Allow nested substitution
+		}
+		return val
+	}
+
+	// Check for - (use default only if unset)
+	if idx := strings.Index(content, "-"); idx != -1 {
+		name := content[:idx]
+		defaultVal := content[idx+1:]
+		val, exists := os.LookupEnv(name)
+		if !exists {
+			return processSubstitution(defaultVal) // Allow nested substitution
+		}
+		return val
+	}
+
+	// No default syntax, just get the variable
+	return os.Getenv(content)
 }
