@@ -39,6 +39,9 @@ func Parse(location string) error {
 			continue
 		}
 
+		// Strip "export " prefix if present
+		line = stripExportPrefix(line)
+
 		// Find the first = sign
 		equalIndex := strings.Index(line, "=")
 		if equalIndex == -1 {
@@ -159,4 +162,17 @@ func removeInlineComments(s string) string {
 		}
 	}
 	return s
+}
+
+// stripExportPrefix removes the "export " prefix from a line if present.
+// Only strips lowercase "export" followed by at least one space.
+func stripExportPrefix(line string) string {
+	const prefix = "export"
+	trimmed := strings.TrimLeftFunc(line, unicode.IsSpace)
+
+	if len(trimmed) > len(prefix) && trimmed[:len(prefix)] == prefix && unicode.IsSpace(rune(trimmed[len(prefix)])) {
+		return strings.TrimLeftFunc(trimmed[len(prefix):], unicode.IsSpace)
+	}
+
+	return line
 }
