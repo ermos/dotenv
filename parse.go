@@ -11,6 +11,8 @@ import (
 // Parse parses the .env file located at the given location and set the environment variables.
 // This function now properly handles:
 // - Quoted values (both single and double quotes)
+// - Multiline values within quotes
+// - Backslash line continuation
 // - Values with spaces
 // - Inline comments with proper detection
 // - Escape sequences in quoted strings
@@ -53,6 +55,12 @@ func Parse(location string) error {
 		// Get raw value (everything after =)
 		rawValue := line[equalIndex+1:]
 
+		// Handle multiline values and backslash continuation
+		rawValue, lineNum, err = readFullValue(rawValue, scanner, &lineNum)
+		if err != nil {
+			return err
+		}
+
 		// Process the value
 		value := processEnvValue(rawValue)
 
@@ -69,6 +77,80 @@ func Parse(location string) error {
 	}
 
 	return nil
+}
+
+// readFullValue reads a complete value that may span multiple lines.
+// Handles quoted multiline values and backslash line continuation.
+func readFullValue(rawValue string, scanner *bufio.Scanner, lineNum *int) (string, int, error) {
+	trimmed := strings.TrimLeftFunc(rawValue, unicode.IsSpace)
+
+	// Check for quoted multiline value
+	if len(trimmed) > 0 && (trimmed[0] == '"' || trimmed[0] == '\'') {
+		quote := trimmed[0]
+		// Check if the closing quote is on the same line
+		if !hasClosingQuote(trimmed[1:], quote) {
+			// Need to read more lines
+			var builder strings.Builder
+			builder.WriteString(rawValue)
+
+			for scanner.Scan() {
+				*lineNum++
+				nextLine := scanner.Text()
+				builder.WriteByte('\n')
+				builder.WriteString(nextLine)
+
+				if hasClosingQuote(nextLine, quote) {
+					break
+				}
+			}
+			return builder.String(), *lineNum, nil
+		}
+		return rawValue, *lineNum, nil
+	}
+
+	// Check for backslash line continuation (unquoted values)
+	if strings.HasSuffix(strings.TrimRightFunc(rawValue, unicode.IsSpace), "\\") {
+		var builder strings.Builder
+		currentValue := rawValue
+
+		for {
+			trimmedVal := strings.TrimRightFunc(currentValue, unicode.IsSpace)
+			if !strings.HasSuffix(trimmedVal, "\\") {
+				builder.WriteString(currentValue)
+				break
+			}
+			// Remove trailing backslash
+			builder.WriteString(trimmedVal[:len(trimmedVal)-1])
+
+			if !scanner.Scan() {
+				break
+			}
+			*lineNum++
+			currentValue = scanner.Text()
+		}
+		return builder.String(), *lineNum, nil
+	}
+
+	return rawValue, *lineNum, nil
+}
+
+// hasClosingQuote checks if a string contains an unescaped closing quote.
+func hasClosingQuote(s string, quote byte) bool {
+	escaped := false
+	for i := 0; i < len(s); i++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if s[i] == '\\' {
+			escaped = true
+			continue
+		}
+		if s[i] == quote {
+			return true
+		}
+	}
+	return false
 }
 
 // processEnvValue handles quote removal, inline comments, and trimming
